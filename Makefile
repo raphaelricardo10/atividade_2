@@ -32,12 +32,15 @@ CPLEXINCDIR   = $(CPLEXDIR)/include
 
 CCFLAGS = $(CCOPT) -I$(CPLEXINCDIR) -I$(CONCERTINCDIR) 
 
-all : facilities_solver
+all : col_solver
 
-facilities_solver: facilities_solver.o
-	$(CCC) $(CCFLAGS) $(CCLNDIRS) facilities_solver.o -o facilities_solver $(CCLNFLAGS)
-facilities_solver.o: facilities_solver.cpp
-	$(CCC) -c $(CCFLAGS) facilities_solver.cpp -o facilities_solver.o
+col_solver: col_solver.o
+	$(CCC) $(CCFLAGS) $(CCLNDIRS) col_solver.o -o col_solver $(CCLNFLAGS)
+col_solver.o: col_solver.cpp
+	$(CCC) -c $(CCFLAGS) col_solver.cpp -o col_solver.o
+
+debug_solver: col_solver
+	./col_solver TPI_COL_1.txt
 
 clean:
-	rm --force ex1 ex1.o ex2 ex2.o ex3 ex3.o tsp tsp.o data.o facilities_solver facilities_solver.o
+	rm --force ex1 ex1.o ex2 ex2.o ex3 ex3.o tsp tsp.o data.o col_solver col_solver.o
