@@ -1,12 +1,13 @@
-#ifndef COL_FILE_H
-#define COL_FILE_H
+#ifndef GRAPH_FILE_H
+#define GRAPH_FILE_H
 
-#include <string>
+#include <set>
 #include <vector>
+#include <string>
 #include <fstream>
 
 #include "matrix.hpp"
-#include "col_problem.hpp"
+#include "graph.hpp"
 
 class ColFile
 {
@@ -41,7 +42,7 @@ public:
         this->number_of_entries = 0;
     }
 
-    ColProblem read_file()
+    Graph read_file()
     {
         std::string fileLine;
         std::ifstream fileStream(this->filename);
@@ -50,28 +51,20 @@ public:
 
         std::vector<std::string> header = this->split_line(fileLine);
 
-        Matrix<double> transfer_costs;
-        Matrix<int> capacity_usages;
-
-        // Discard the header
-        getline(fileStream, fileLine);
+        EdgeVec edges;
+        int num_vertex = atoi(header[2].c_str());
 
         while (getline(fileStream, fileLine))
         {
             std::vector<std::string> entry = this->split_line(fileLine);
 
-            int facility = atoi(entry[0].c_str()) - 1;
-            int client = atoi(entry[1].c_str()) - 1;
-            double transfer_cost = atof(entry[2].c_str());
-            int capacity_cost = atoi(entry[3].c_str());
+            int src_vertex = atoi(entry[1].c_str()) - 1;
+            int dest_vertex = atoi(entry[2].c_str()) - 1;
 
-            MatrixEntryKey key = std::make_tuple(facility, client);
-
-            transfer_costs[key] = transfer_cost;
-            capacity_usages[key] = capacity_cost;
+            edges.insert(std::make_tuple(src_vertex, dest_vertex));
         }
 
-        return ColProblem(atoi(header[0].c_str()), atoi(header[1].c_str()), atoi(header[2].c_str()), atoi(header[3].c_str()), transfer_costs, capacity_usages);
+        return Graph(edges, num_vertex);
     }
 };
 
