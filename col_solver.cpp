@@ -1,9 +1,10 @@
 #include <sstream>
 #include <iostream>
+#include <tuple>
 #include <ilcplex/ilocplex.h>
 
-#include "col_file.hpp"
-#include "col_problem.hpp"
+#include "graph_file.hpp"
+#include "graph.hpp"
 
 ILOSTLBEGIN
 int main(int argc, char *argv[])
@@ -17,129 +18,120 @@ int main(int argc, char *argv[])
     std::string filename(argv[1]);
 
     ColFile file(filename);
-    ColProblem facilities_problem = file.read_file();
+    Graph graph = file.read_file();
 
     IloEnv env;          // declara Variável de ambiente do CPLEX
     IloModel model(env); // declara Variavel do modelo do CPLEX (que existe dentro do ambiente criado)
 
-    IloBoolVarArray y(env); // declara Vetor de variáveis numéricas (que existe dentro do ambiente criado)
-                            // Vetor inicialmente vazio
+    IloBoolVarArray w(env, graph.num_vertex); // declara Vetor de variáveis numéricas (que existe dentro do ambiente criado)
+                                              // Vetor inicialmente vazio
 
-    IloArray<IloBoolVarArray> x(env, facilities_problem.number_of_facilities);
+    IloArray<IloBoolVarArray> x(env, graph.num_vertex);
+    std::cout << "OK!:" << graph.num_vertex;
 
-
-    // Variável Y
-    for (int i = 0; i < facilities_problem.number_of_facilities; i++)
+    // Variável w
+    for (int j = 0; j < graph.num_vertex; j++)
     {
         std::ostringstream oss;
-        oss << "y_" << i + 1;
+        oss << "w_" << j + 1;
 
-        y.add(IloBoolVar(env, oss.str().c_str()));
+        w[j] = IloBoolVar(env, oss.str().c_str());
     }
 
     // Variável X
-    for (int i = 0; i < facilities_problem.number_of_facilities; i++)
+    for (int i = 0; i < graph.num_vertex; i++)
     {
-        x[i] = IloBoolVarArray(env, facilities_problem.number_of_clients);
+        x[i] = IloBoolVarArray(env, graph.num_vertex);
 
-        for (int j = 0; j < facilities_problem.number_of_clients; j++)
+        for (int j = 0; j < graph.num_vertex; j++)
         {
             std::ostringstream oss;
             oss << "x_" << i + 1 << "_" << j + 1;
 
-            x[i][j] = IloBoolVar(env, oss.str().c_str());
+            // Zera as variáveis que não são arestas
+            int max = graph.has_edge(i, j) ? 1 : 0;
+
+            x[i][j] = IloBoolVar(env, 0, max, oss.str().c_str());
             model.add(x[i][j]);
         }
     }
 
-    // Todo cliente deve ser atendido
-    IloConstraintArray client_constraints(env);
-    for (int j = 0; j < facilities_problem.number_of_clients; j++)
+    // Todo vértice deve ter uma cor
+    IloConstraintArray single_color_constraints(env);
+    for (int i = 0; i < graph.num_vertex; i++)
     {
         IloExpr constraint(env);
 
-        for (int i = 0; i < facilities_problem.number_of_facilities; i++)
+        for (int j = 0; j < graph.num_vertex; j++)
         {
             constraint += x[i][j];
         }
 
-        client_constraints.add(constraint == 1);
+        single_color_constraints.add(constraint == 1);
         constraint.end();
     }
 
-    // Restrições disjuntas
-    IloConstraintArray disjoint_constraints(env);
-    for (Edge edge : facilities_problem.edges)
+    // Cada vértice de uma aresta deve ter uma cor diferente
+    IloConstraintArray edge_color_constraints(env);
+    for (int j = 0; j < graph.num_vertex; j++)
     {
-        int i = edge.first;
-        int j = edge.second;
+        for (Edge edge : graph.edges)
+        {
+            int i = edge.first;
+            int k = edge.second;
 
-        disjoint_constraints.add(x[i][j] <= y[i]);
+            edge_color_constraints.add(x[i][j] + x[k][j] <= w[j]);
+        }
     }
 
-    // Capacidade
-    IloConstraintArray capacity_constraints(env);
-    for (int i = 0; i < facilities_problem.number_of_facilities; i++)
+    // Quebra de simetria
+    IloConstraintArray symmetric_break_constraints(env);
+    for (int j = 0; j < graph.num_vertex - 1; j++)
+    {
+        edge_color_constraints.add(w[j] >= w[j + 1]);
+    }
+
+    // Restrição de fortalecimento
+    IloConstraintArray strong_constraints(env);
+    for (int j = 0; j < graph.num_vertex; j++)
     {
         IloExpr constraint(env);
-
-        for (auto MatrixEntry : facilities_problem.capacity_usages)
+        for (int i = 0; i < graph.num_vertex; i++)
         {
-            Edge edge = MatrixEntry.first;
-            int capacity_usage = MatrixEntry.second;
-
-            if (edge.first == i)
-            {
-                int j = edge.second;
-                constraint += capacity_usage * x[i][j];
-            }
+            constraint += x[i][j];
         }
 
-        client_constraints.add(constraint <= facilities_problem.capacity * y[i]);
+        strong_constraints.add(w[j] <= constraint);
         constraint.end();
     }
 
-    // Derruba variáveis sobressalentes
-    IloConstraintArray unused_variables_constraint(env);
-    for (int i = 0; i < facilities_problem.number_of_facilities; i++)
-    {
-        for (int j = 0; j < facilities_problem.number_of_clients; j++)
-        {
-            if (facilities_problem.capacity_usages.find({i, j}) == facilities_problem.capacity_usages.end()) {
-                unused_variables_constraint.add(x[i][j] == 0);
-            }
-        }
-    }
-
-    model.add(client_constraints);
-    model.add(disjoint_constraints);
-    model.add(capacity_constraints);
-    model.add(unused_variables_constraint);
+    model.add(single_color_constraints);
+    model.add(edge_color_constraints);
+    model.add(strong_constraints);
+    model.add(symmetric_break_constraints);
 
     // Função Objetivo
     IloExpr fo(env);
-    for (int i = 0; i < facilities_problem.number_of_facilities; i++)
+    for (int j = 0; j < graph.num_vertex; j++)
     {
-        fo += facilities_problem.opening_cost * y[i];
-    }
-
-    for (Edge edge : facilities_problem.edges)
-    {
-        int i = edge.first;
-        int j = edge.second;
-
-        fo += facilities_problem.transfer_costs[{i, j}] * x[i][j];
+        fo += w[j];
     }
 
     model.add(IloMinimize(env, fo, "FO"));
 
-    IloCplex solver(model); // declara variável "solver" sobre o modelo a ser solucionado
-    solver.exportModel("model.lp");
-    solver.solve(); // chama o "solver"
-
-    cout << "Max=" << solver.getObjValue() << endl;    //  imprime solução do problema
-    cout << "LB=" << solver.getBestObjValue() << endl; //  imprime solução do problema
-    env.end();
+    try
+    {
+        IloCplex solver(model); // declara variável "solver" sobre o modelo a ser solucionado
+        solver.exportModel("model.lp");
+        solver.solve();                                    // chama o "solver"
+        cout << "Max=" << solver.getObjValue() << endl;    //  imprime solução do problema
+        cout << "LB=" << solver.getBestObjValue() << endl; //  imprime solução do problema
+        env.end();
+    }
+    catch (IloException &e)
+    {
+        std::cout << e;
+    }
 
     std::cout << "OK!";
 }
